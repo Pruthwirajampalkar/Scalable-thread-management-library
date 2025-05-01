@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thread Manager Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .hover-scale {
+            transition: transform 0.2s;
+        }
+        .hover-scale:hover {
+            transform: scale(1.02);
+        }
+        .task-card {
+            transition: all 0.3s;
+        }
+        .task-card:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        .chart-container {
+            position: relative;
+            height: 200px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold mb-8 text-white text-center">Thread Manager Dashboard</h1>
+        
+        <!-- Performance Metrics -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="glass-card rounded-lg shadow-lg p-6 hover-scale">
+                <h3 class="text-lg font-semibold mb-4 text-gray-800">Thread Metrics</h3>
+                <div id="threadMetrics" class="space-y-3">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+            <div class="glass-card rounded-lg shadow-lg p-6 hover-scale">
+                <h3 class="text-lg font-semibold mb-4 text-gray-800">Task Metrics</h3>
+                <div id="taskMetrics" class="space-y-3">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+            <div class="glass-card rounded-lg shadow-lg p-6 hover-scale">
+                <h3 class="text-lg font-semibold mb-4 text-gray-800">Resource Usage</h3>
+                <div id="resourceMetrics" class="space-y-3">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Graphs Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- CPU Usage Graph -->
+            <div class="glass-card rounded-lg shadow-lg p-6 hover-scale">
+                <h3 class="text-lg font-semibold mb-4 text-gray-800">CPU Usage Over Time</h3>
+                <div class="chart-container">
+                    <canvas id="cpuChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Task Queue Graph -->
+            <div class="glass-card rounded-lg shadow-lg p-6 hover-scale">
+                <h3 class="text-lg font-semibold mb-4 text-gray-800">Task Queue Status</h3>
+                <div class="chart-container">
+                    <canvas id="queueChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Task Completion Graph -->
+            <div class="glass-card rounded-lg shadow-lg p-6 hover-scale">
+                <h3 class="text-lg font-semibold mb-4 text-gray-800">Task Completion Rate</h3>
+                <div class="chart-container">
+                    <canvas id="taskChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Thread Activity Graph -->
+            <div class="glass-card rounded-lg shadow-lg p-6 hover-scale">
+                <h3 class="text-lg font-semibold mb-4 text-gray-800">Thread Activity</h3>
+                <div class="chart-container">
+                    <canvas id="threadChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Thread Pool Management -->
+        <div class="glass-card rounded-lg shadow-lg p-6 mb-8 hover-scale">
+            <h3 class="text-lg font-semibold mb-4 text-gray-800">Thread Pool Management</h3>
+            <div class="flex space-x-4 mb-4">
+                <button id="createPool" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 transform hover:scale-105">
+                    Create Thread Pool
+                </button>
+                <input type="number" id="poolSize" placeholder="Pool Size" class="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" value="4">
+            </div>
+            <div id="pools" class="space-y-4">
+                <!-- Thread pools will be dynamically added here -->
+            </div>
+        </div>
+
+        <!-- Task Management -->
+        <div class="glass-card rounded-lg shadow-lg p-6">
+            <h3 class="text-lg font-semibold mb-4 text-gray-800">Task Management</h3>
+            <div class="mb-4 flex flex-wrap gap-2">
+                <select id="taskType" class="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="math">Math Expression</option>
+                    <option value="custom">Custom Function</option>
+                </select>
+                <input type="text" id="taskInput" placeholder="Enter task (e.g., 2+3)" class="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select id="taskPriority" class="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="low">Low</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="high">High</option>
+                </select>
+                <button id="addTask" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 transform hover:scale-105">
+                    Add Task
+                </button>
+            </div>
+            <div id="tasks" class="space-y-4">
+                <!-- Tasks will be dynamically added here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        
+        // Initialize charts
+        const charts = {
+            cpu: new Chart(document.getElementById('cpuChart'), {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'CPU Usage (%)',
+                        data: [],
+                        borderColor: 'rgb(99, 102, 241)',
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 0
+                    },
+                    layout: {
+                        padding: {
+                            top: 10,
+                            right: 10,
+                            bottom: 10,
+                            left: 10
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            grid: {
+                                display: true,
+                                drawBorder: false
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                maxRotation: 0,
+                                autoSkip: true,
+                                maxTicksLimit: 5
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            }),
+            queue: new Chart(document.getElementById('queueChart'), {
+                type: 'bar',
+                data: {
+                    labels: ['Queued', 'Running', 'Completed'],
+                    datasets: [{
+                        label: 'Tasks',
+                        data: [0, 0, 0],
+                        backgroundColor: [
+                            'rgba(255, 159, 64, 0.7)',
+                            'rgba(54, 162, 235, 0.7)',
+                            'rgba(75, 192, 192, 0.7)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 0
+                    },
+                    layout: {
+                        padding: {
+                            top: 10,
+                            right: 10,
+                            bottom: 10,
+                            left: 10
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                display: true,
+                                drawBorder: false
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            }),
+            task: new Chart(document.getElementById('taskChart'), {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Tasks Completed',
+                        data: [],
+                        borderColor: 'rgb(16, 185, 129)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 0
+                    },
+                    layout: {
+                        padding: {
+                            top: 10,
+                            right: 10,
+                            bottom: 10,
+                            left: 10
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                display: true,
+                                drawBorder: false
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                maxRotation: 0,
+                                autoSkip: true,
+                                maxTicksLimit: 5
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            }),
+            thread: new Chart(document.getElementById('threadChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Active', 'Paused', 'Stopped'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: [
+                            'rgba(16, 185, 129, 0.7)',
+                            'rgba(245, 158, 11, 0.7)',
+                            'rgba(239, 68, 68, 0.7)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 0
+                    },
+                    layout: {
+                        padding: {
+                            top: 10,
+                            right: 10,
+                            bottom: 10,
+                            left: 10
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 10
+                            }
+                        }
+                    }
+                }
+            })
+        };
+
+        function updateMetrics(metrics) {
+            // Update thread metrics
+            document.getElementById('threadMetrics').innerHTML = `
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">Active Threads:</span>
+                    <span class="font-medium text-blue-600">${metrics.activeThreads}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">Total Threads:</span>
+                    <span class="font-medium text-blue-600">${metrics.totalThreads}</span>
+                </div>
+            `;
+
+            // Update task metrics
+            document.getElementById('taskMetrics').innerHTML = `
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">Tasks Running:</span>
+                    <span class="font-medium text-green-600">${metrics.tasksRunning}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">Tasks Queued:</span>
+                    <span class="font-medium text-yellow-600">${metrics.tasksQueued}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">Tasks Completed:</span>
+                    <span class="font-medium text-green-600">${metrics.tasksCompleted}</span>
+                </div>
+            `;
+
+            // Update resource metrics
+            document.getElementById('resourceMetrics').innerHTML = `
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">CPU Usage:</span>
+                    <span class="font-medium text-purple-600">${metrics.cpuUsage.toFixed(2)}%</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">Memory Usage:</span>
+                    <span class="font-medium text-purple-600">${metrics.memoryUsage.toFixed(2)} MB</span>
+                </div>
+            `;
+
+            // Update CPU chart
+            const now = new Date();
+            const timeLabel = now.toLocaleTimeString();
+            
+            // Maintain a fixed window of 20 data points
+            if (charts.cpu.data.labels.length >= 20) {
+                charts.cpu.data.labels.shift();
+                charts.cpu.data.datasets[0].data.shift();
+            }
+            charts.cpu.data.labels.push(timeLabel);
+            charts.cpu.data.datasets[0].data.push(metrics.cpuUsage);
+            charts.cpu.update();
+
+            // Update queue chart
+            charts.queue.data.datasets[0].data = [
+                metrics.tasksQueued,
+                metrics.tasksRunning,
+                metrics.tasksCompleted
+            ];
+            charts.queue.update();
+
+            // Update task completion chart
+            if (charts.task.data.labels.length >= 20) {
+                charts.task.data.labels.shift();
+                charts.task.data.datasets[0].data.shift();
+            }
+            charts.task.data.labels.push(timeLabel);
+            charts.task.data.datasets[0].data.push(metrics.tasksCompleted);
+            charts.task.update();
+
+            // Update thread activity chart
+            charts.thread.data.datasets[0].data = [
+                metrics.activeThreads,
+                metrics.totalThreads - metrics.activeThreads,
+                0
+            ];
+            charts.thread.update();
+        }
+
+        // Thread Pool Management
+        document.getElementById('createPool').addEventListener('click', async () => {
+            const size = parseInt(document.getElementById('poolSize').value) || 4;
+            try {
+                const response = await fetch('/api/pools', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ size })
+                });
+                const data = await response.json();
+                console.log('Created pool:', data.poolId);
+            } catch (error) {
+                console.error('Error creating pool:', error);
+            }
+        });
+
+        // Task Management
+        document.getElementById('addTask').addEventListener('click', async () => {
+            const type = document.getElementById('taskType').value;
+            const input = document.getElementById('taskInput').value;
+            const priority = document.getElementById('taskPriority').value;
+
+            try {
+                const response = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type,
+                        expression: type === 'math' ? input : null,
+                        code: type === 'custom' ? input : null,
+                        priority
+                    })
+                });
+                const data = await response.json();
+                if (!data.taskId) {
+                    console.error('Failed to add task');
+                }
+            } catch (error) {
+                console.error('Error adding task:', error);
+            }
+        });
+
+        // Socket.IO event handlers
+        socket.on('metrics', updateMetrics);
+        socket.on('poolUpdate', updatePools);
+        socket.on('taskUpdate', updateTasks);
+
+        function updatePools(pools) {
+            const poolsContainer = document.getElementById('pools');
+            poolsContainer.innerHTML = '';
+            
+            Object.entries(pools).forEach(([poolId, pool]) => {
+                const poolElement = document.createElement('div');
+                poolElement.className = 'bg-white rounded-lg p-4 shadow-md task-card';
+                poolElement.innerHTML = `
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="font-semibold text-gray-800">Pool ${poolId}</h4>
+                        <span class="px-2 py-1 rounded-full text-white text-sm ${
+                            pool.status === 'running' ? 'bg-green-500' : 'bg-yellow-500'
+                        }">
+                            ${pool.status}
+                        </span>
+                    </div>
+                    <div class="flex justify-between mb-2 text-gray-600">
+                        <span>Size: ${pool.size}</span>
+                        <span>Active Workers: ${pool.tasks.length}</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="pausePool('${poolId}')" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-1 px-3 rounded-lg transition duration-300">
+                            Pause
+                        </button>
+                        <button onclick="resumePool('${poolId}')" class="bg-green-500 hover:bg-green-600 text-white font-bold py-1 px-3 rounded-lg transition duration-300">
+                            Resume
+                        </button>
+                        <button onclick="removePool('${poolId}')" class="bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded-lg transition duration-300">
+                            Remove
+                        </button>
+                    </div>
+                `;
+                poolsContainer.appendChild(poolElement);
+            });
+        }
+
+        function updateTasks(tasks) {
+            const tasksContainer = document.getElementById('tasks');
+            tasksContainer.innerHTML = '';
+            
+            Object.entries(tasks).forEach(([taskId, task]) => {
+                const taskElement = document.createElement('div');
+                taskElement.className = 'bg-white rounded-lg p-4 shadow-md task-card';
+                taskElement.innerHTML = `
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="font-semibold text-gray-800">Task ${taskId}</h4>
+                        <span class="px-2 py-1 rounded-full text-white text-sm ${
+                            task.status === 'completed' ? 'bg-green-500' :
+                            task.status === 'running' ? 'bg-blue-500' :
+                            'bg-yellow-500'
+                        }">
+                            ${task.status}
+                        </span>
+                    </div>
+                    <div class="flex justify-between mb-2 text-gray-600">
+                        <span>Type: ${task.type}</span>
+                        <span>Priority: ${task.priority}</span>
+                    </div>
+                    <div class="mb-2 text-gray-600">
+                        <span>Expression: ${task.expression || task.code}</span>
+                    </div>
+                    ${task.result ? `
+                        <div class="bg-green-50 p-2 rounded-lg text-green-800">
+                            Result: ${task.result}
+                        </div>
+                    ` : ''}
+                `;
+                tasksContainer.appendChild(taskElement);
+            });
+        }
+
+        async function pausePool(poolId) {
+            try {
+                const response = await fetch(`/api/pools/${poolId}/pause`, { method: 'POST' });
+                const data = await response.json();
+                if (!data.success) {
+                    console.error('Failed to pause pool');
+                }
+            } catch (error) {
+                console.error('Error pausing pool:', error);
+            }
+        }
+
+        async function resumePool(poolId) {
+            try {
+                const response = await fetch(`/api/pools/${poolId}/resume`, { method: 'POST' });
+                const data = await response.json();
+                if (!data.success) {
+                    console.error('Failed to resume pool');
+                }
+            } catch (error) {
+                console.error('Error resuming pool:', error);
+            }
+        }
+
+        async function removePool(poolId) {
+            try {
+                const response = await fetch(`/api/pools/${poolId}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (!data.success) {
+                    console.error('Failed to remove pool');
+                }
+            } catch (error) {
+                console.error('Error removing pool:', error);
+            }
+        }
+    </script>
+</body>
+</html> 
